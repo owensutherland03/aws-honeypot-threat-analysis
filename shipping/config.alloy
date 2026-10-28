@@ -1,0 +1,73 @@
+// Grafana Alloy: ship Cowrie's JSON log to Grafana Cloud Loki.
+// Deployed on the honeypot host at /etc/alloy/config.alloy
+//
+// Placeholders replaced on the host (not secret, but kept out of the repo):
+//   LOKI_PUSH_URL  e.g. https://logs-prod-XXX.grafana.net/loki/api/v1/push
+//   LOKI_USER_ID   numeric Loki user ID from the Grafana Cloud stack details
+// The token itself is read from /etc/alloy/loki_token (root:alloy 0640).
+
+// --- Secret: write-only Grafana Cloud token, never in this file ---------------
+local.file "loki_token" {
+  filename  = "/etc/alloy/loki_token"
+  is_secret = true
+}
+
+// --- Which files to read ------------------------------------------------------
+// Only the live file. Cowrie rotates it daily by renaming, then reopens a new
+// cowrie.json; the tailer follows the path, so rotated copies aren't re-sent.
+local.file_match "cowrie" {
+  path_targets = [{
+    __path__ = "/var/log/cowrie/cowrie.json",
+    job      = "cowrie",
+  }]
+}
+
+loki.source.file "cowrie" {
+  targets    = local.file_match.cowrie.targets
+  forward_to = [loki.process.cowrie.receiver]
+}
+
+// --- Parse each JSON event ----------------------------------------------------
+loki.process "cowrie" {
+  stage.json {
+    expressions = {
+      eventid  = "eventid",
+      protocol = "protocol",
+      ts       = "timestamp",
+    }
+  }
+
+  // Use the time the event happened, not the time Alloy read it.
+  stage.timestamp {
+    source = "ts"
+    format = "RFC3339Nano"
+  }
+
+  // Labels must be LOW cardinality (few distinct values): ~30 event types and
+  // 2 protocols. High-cardinality fields like src_ip, username or password
+  // stay in the log line and are parsed at query time with `| json`.
+  stage.labels {
+    values = {
+      eventid  = "",
+      protocol = "",
+    }
+  }
+
+  forward_to = [loki.write.grafana_cloud.receiver]
+}
+
+// --- Where to send it ---------------------------------------------------------
+loki.write "grafana_cloud" {
+  endpoint {
+    url = "LOKI_PUSH_URL"
+
+    basic_auth {
+      username = "LOKI_USER_ID"
+      password = local.file.loki_token.content
+    }
+  }
+
+  external_labels = {
+    sensor = "honeypot-01",
+  }
+}

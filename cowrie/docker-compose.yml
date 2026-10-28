@@ -1,0 +1,54 @@
+# Cowrie SSH/Telnet honeypot.
+# Deployed on the honeypot host at /opt/cowrie/docker-compose.yml
+#   sudo docker compose -f /opt/cowrie/docker-compose.yml up -d
+#
+# Config is set with environment variables (COWRIE_<SECTION>_<KEY>), which
+# override cowrie.cfg.dist inside the image, so no config files need copying.
+services:
+  cowrie:
+    # Pinned by digest: "latest" can change silently; a digest cannot.
+    # Pulled and inspected 2026-10-15 (arm64, runs as 999:999).
+    image: cowrie/cowrie@sha256:019726c8deef20729162cda492d9385917b579c9ace6368e47e7566cd2491ba1
+    container_name: cowrie
+    restart: unless-stopped
+    ports:
+      # Host port -> container port. Docker installs a DNAT rule, which keeps
+      # the attacker's real source IP. Cowrie itself never needs root.
+      - "22:2222"   # SSH
+      - "23:2223"   # Telnet
+    environment:
+      COWRIE_TELNET_ENABLED: "yes"
+      COWRIE_HONEYPOT_HOSTNAME: "prod-db-02"   # look like something worth stealing
+      # Must match /proc/version inside fs.pickle (see customize_fs.py)
+      COWRIE_SHELL_KERNEL_VERSION: "6.1.0-28-amd64"
+      COWRIE_SHELL_KERNEL_BUILD_STRING: "#1 SMP PREEMPT_DYNAMIC Debian 6.1.119-1 (2024-11-22)"
+    volumes:
+      # Paths come from `docker image inspect cowrie/cowrie` (.Config.Volumes).
+      - cowrie-var:/cowrie/cowrie-git/var      # logs, downloads, tty recordings
+      - cowrie-etc:/cowrie/cowrie-git/etc      # generated host keys, userdb
+      # Custom fake filesystem (built by customize_fs.py), mounted read-only
+      # over Cowrie's default to remove the "phil"/"svr04" fingerprints.
+      - ./fs.pickle:/cowrie/cowrie-git/src/cowrie/data/fs.pickle:ro
+      # JSON logs on a host path the log shipper can read (Phase 4).
+      # Host dir: 999:root 2750 with ACL user:alloy:r (read-only, even after
+      # Cowrie chmods its log to 664). See docs/phases/phase-4-log-shipping.md.
+      - /var/log/cowrie:/cowrie/cowrie-git/var/log/cowrie
+    # --- container hardening ---
+    read_only: true            # image filesystem can't be modified
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL                    # no Linux capabilities at all
+    security_opt:
+      - no-new-privileges:true # no setuid escalation inside the container
+    mem_limit: 512m
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  cowrie-var:
+  cowrie-etc:

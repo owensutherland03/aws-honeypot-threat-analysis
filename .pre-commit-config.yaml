@@ -1,0 +1,18 @@
+# Local guardrail: scans staged changes for secrets BEFORE a commit is created.
+# Setup (once, on any machine you commit from):
+#   pip install pre-commit && pre-commit install
+# Update hook versions occasionally with: pre-commit autoupdate
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: detect-private-key
+      - id: check-added-large-files   # stops accidental log dumps / malware samples
+        args: ["--maxkb=500"]
+      - id: end-of-file-fixer
+      - id: trailing-whitespace

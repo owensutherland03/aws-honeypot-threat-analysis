@@ -1,0 +1,37 @@
+# /etc/systemd/system/honeypot-reporter.service
+# One run of the AbuseIPDB reporter; triggered by honeypot-reporter.timer.
+[Unit]
+Description=Report honeypot attackers to AbuseIPDB
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=hpreporter
+Group=hpreporter
+EnvironmentFile=/etc/honeypot-reporter/reporter.env
+ExecStart=/usr/bin/python3 -I /opt/honeypot-reporter/abuse_reporter.py
+# /var/lib/honeypot-reporter, created and owned by hpreporter (state.db lives here)
+StateDirectory=honeypot-reporter
+StateDirectoryMode=0700
+UMask=0077
+
+# --- sandboxing: the reporter only needs to read logs and make HTTPS calls ---
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native

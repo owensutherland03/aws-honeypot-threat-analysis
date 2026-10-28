@@ -1,0 +1,11 @@
+# /etc/systemd/system/honeypot-reporter.timer
+[Unit]
+Description=Run the AbuseIPDB reporter every 15 minutes
+
+[Timer]
+OnCalendar=*:0/15
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+# Gitleaks config: default rules, plus a narrow allowlist.
+# Only the Phase 0 doc is allowlisted, because it contains a documented FAKE
+# token used to test the hook. Keep this list as short as possible.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Docs containing intentionally fake test secrets"
+paths = [
+  '''^docs/phases/phase-0-repo-foundation\.md$''',
+]

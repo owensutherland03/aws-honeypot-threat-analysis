@@ -1,0 +1,6 @@
+// /etc/apt/apt.conf.d/52-honeypot-auto-reboot
+// Ubuntu installs security updates automatically (unattended-upgrades).
+// Some (kernel, libc) need a reboot to take effect; do it at 04:00 UTC.
+// Cowrie comes back on its own (Docker restart policy).
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "04:00";

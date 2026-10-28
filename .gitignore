@@ -1,0 +1,71 @@
+# =====================================================================
+# SECRETS - never commit these. Real values live only on the host
+# (or in a password manager). Templates end in .example and ARE tracked.
+# =====================================================================
+.env
+.env.*
+!.env.example
+*.env
+!*.env.example
+secrets/
+*.secret
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+credentials
+credentials.*
+*.local.*
+*.local
+
+# AWS CLI / SSO caches if anyone ever runs tools from inside the repo
+.aws/
+
+# Terraform state contains resource IDs and sometimes secrets
+*.tfstate
+*.tfstate.*
+.terraform/
+*.tfvars
+!*.tfvars.example
+crash.log
+
+# =====================================================================
+# HONEYPOT DATA - raw logs and captured artifacts stay off GitHub.
+# Raw logs contain unredacted IPs; captured downloads may be live malware.
+# Only curated, redacted summaries go in the repo (see incidents/).
+# =====================================================================
+data/
+logs/
+*.log
+cowrie/var/
+cowrie/dl/
+cowrie/tty/
+downloads/
+samples/
+*.bin
+*.malware
+
+# Reporter state (dedupe / cooldown database)
+reporter/state/
+*.db
+*.sqlite
+*.sqlite3
+
+# =====================================================================
+# Tooling noise
+# =====================================================================
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+node_modules/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
