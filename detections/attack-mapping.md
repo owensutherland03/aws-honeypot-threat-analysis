@@ -2,7 +2,7 @@
 
 How behaviour seen by the honeypot maps to [MITRE ATT&CK Enterprise](https://attack.mitre.org/) techniques, with a LogQL query to find each one in Grafana (data source: `grafanacloud-<stack>-logs`).
 
-**Status** reflects the data collected so far (updated 2026-10-16, ~19.5 h live). Re-check with [`analysis/cowrie_report.py`](../analysis/cowrie_report.py).
+**Status** reflects the data collected so far (final: 2026-10-15 → 2026-10-26, 12 days). Re-check with [`analysis/cowrie_report.py`](../analysis/cowrie_report.py).
 
 **Visibility caveat:** Cowrie is medium-interaction. It records what attackers *type and attempt*; nothing actually executes. A mapping means "the attacker attempted this technique", not "the technique succeeded".
 
@@ -31,7 +31,7 @@ scan 22/23        Telnet admin/admin     shell / ping; sh     busybox, /proc/sel
 | Defense Evasion | **T1564.001** Hide Artifacts: Hidden Files and Directories | Dot-files/dirs (`/var/.f`, `/tmp/.x`, `/dev/shm/.`) | ✅ Observed |
 | Defense Evasion | **T1070.003** Indicator Removal: Clear Command History | `history -c`, `unset HISTFILE`, deleting `.bash_history` | ⏳ Not yet |
 | Defense Evasion | **T1027** Obfuscated Files or Information | `base64 -d`, `echo -e '\x..'` payloads | ✅ Observed (`echo -e "\x47\x41…"` = `GAYFGT`, Gafgyt marker) |
-| Command and Control | **T1105** Ingress Tool Transfer | `wget`/`curl`/`tftp`/`ftpget`; `session.file_download` with SHA-256 | ✅ Attempted (IR-2026-002: wget/tftp/ftpget, all failed) |
+| Command and Control | **T1105** Ingress Tool Transfer | `wget`/`curl`/`tftp`/`ftpget`; `session.file_download` with SHA-256 | ✅ Observed: attempted and failed in IR-2026-002; **successful** in IR-2026-004 (29 files captured) |
 | Defense Evasion | **T1070.004** Indicator Removal: File Deletion | `rm -rf` of a file right after running it | ✅ Observed (IR-2026-002) |
 | Discovery | **T1057** Process Discovery | Looping over `/proc/*`, `ps` | ✅ Observed (Campaign D competitor-killer) |
 | Persistence | **T1098.004** Account Manipulation: SSH Authorized Keys | Writing to `~/.ssh/authorized_keys` | ⏳ Not yet |

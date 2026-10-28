@@ -120,3 +120,4 @@ An AWS Budget alert at $15/month is configured in Phase 1.
 | 2026-10-15 | Docker `-p 22:2222` instead of an iptables REDIRECT | REDIRECT + published port (rejected: docker-proxy would mask attacker source IPs) |
 | 2026-10-15 | Custom fs.pickle persona (prod-db-02 / dbadmin / postgres) before going live | Stock Cowrie defaults (rejected: `phil`/`svr04` are well-known honeypot fingerprints) |
 | 2026-10-15 | Keep Cowrie default userdb (accept almost any login) | Realistic userdb (deferred: build it from observed credential data after ~1 week) |
+| 2026-10-28 | Cowrie `mem_limit` 512m → 300m | Keep 512m (rejected: host OOM after ~10 days, IR-2026-003) |

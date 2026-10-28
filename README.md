@@ -4,7 +4,7 @@ An SSH/Telnet honeypot built with **Cowrie** on **Ubuntu Server 24.04 (ARM64) in
 
 Every component was built and configured individually (no all-in-one stack) to capture real attacker behavior and turn it into incident-style analysis.
 
-> **Status:** Lab concluded (October 2026). Ran live on the internet for ~2 weeks; the infrastructure is being decommissioned. A final **Results** section follows the shutdown.
+> **Status:** Decommissioned 2026-10-28 after 12 days of live data (2026-10-15 → 10-26). Infrastructure torn down; code, configs, detections and incident reports remain here.
 
 ## What it does
 
@@ -36,6 +36,44 @@ Full design, trust boundaries, cost, and risk register: **[docs/architecture.md]
 
 **Estimated cost:** ~$12/month (EC2 + public IPv4 + disk). Everything else is free tier.
 
+## Results (2026-10-15 → 2026-10-26)
+
+The sensor collected data for 12 days, then failed from host memory exhaustion ([IR-2026-003](incidents/IR-2026-003-sensor-outage-memory-exhaustion.md)) and was decommissioned on 2026-10-28.
+
+| Metric | Value |
+|---|---|
+| Events | **761,650** |
+| Sessions | **20,385** (13,670 Telnet · 6,715 SSH) |
+| Unique source IPs | **1,534** |
+| Logins accepted / rejected | 16,729 / 377 (the userdb accepts almost everything by design) |
+| Commands captured | **407,959** |
+| Files captured | **29 payloads**: 20 ARM bot builds, 5 x86-64 binaries, 4 downloader scripts ([IR-2026-004](incidents/IR-2026-004-multi-arch-botnet-payloads.md)) |
+| Download attempts blocked / failed | 811 (egress allowed only TCP 80/443) |
+| IPs reported to AbuseIPDB | **751** (860 reports, 36–108 per day) |
+| Time to first attacker | < 1 minute after the ports opened |
+| Busiest day | 2026-10-21: 355,500 events (47 % of the dataset) |
+
+**Top credentials:** `admin/admin` (2,114) · `root/vizxv` · `root/admin` · `root/xc3511` · `support/support` · `root/888888` · `root/juantech`. Nearly all come from the default-credential list in the public Mirai source code.
+
+**What attackers did:** almost all traffic was automated IoT botnet activity: router-CLI escapes (`enable` → `system` → `shell` → `sh`), BusyBox checks, writable-directory probing, multi-protocol malware downloads, and a competitor-killer script run 4,000+ times that hunts rival bots by their deleted executables.
+
+**Campaigns** were separated by Cowrie's session-recording hash: identical recordings from different IPs mean the same script.
+
+| Report | What it covers |
+|---|---|
+| [IR-2026-001](incidents/IR-2026-001-telnet-botnet-loader.md) | Telnet loader campaign on a 15-minute cadence; identical session hashes across sources |
+| [IR-2026-002](incidents/IR-2026-002-multi-protocol-dropper.md) | wget → tftp → ftpget dropper; two of three delivery paths **blocked by egress rules** |
+| [IR-2026-003](incidents/IR-2026-003-sensor-outage-memory-exhaustion.md) | Our own outage: Cowrie grew ~10×, host OOM; root cause and fixes |
+| [IR-2026-004](incidents/IR-2026-004-multi-arch-botnet-payloads.md) | `jkl*` kit: 11-architecture downloader with `selfrep` self-propagation; 29 files hashed |
+
+**ATT&CK coverage:** 13 techniques observed across 7 tactics. See [`detections/attack-mapping.md`](detections/attack-mapping.md), each with a LogQL query.
+
+**Lessons**
+- **Egress filtering works.** It blocked TFTP/FTP malware delivery, but allowing a whole port (80) still let one kit through. Allow destinations, not ports.
+- **Size resource limits for the host, not the process.** A 512 MB container limit on a 1 GB host let the host run out of memory first.
+- **End-to-end "no data" alerts catch every failure**, but need resource metrics alongside them to explain *why*.
+- **Analysis tooling has to stream** at honeypot scale (the first report script was itself OOM-killed at 761k events).
+
 ## Project phases
 
 | # | Phase | Status |
@@ -47,7 +85,7 @@ Full design, trust boundaries, cost, and risk register: **[docs/architecture.md]
 | 4 | Log shipping & Grafana dashboard | ✅ |
 | 5 | MITRE ATT&CK mapping & incident summaries | ✅ (ongoing: new incidents as data arrives) |
 | 6 | AbuseIPDB reporting (dry run → enable; DShield deferred) | ✅ |
-| 7 | Extras (web honeypot) & public-release hardening | ⬜ |
+| 7 | Extras & public release (no-data alert, outage RCA, publication) | ✅ partial |
 
 Build notes for each phase (what was built and why) are in [`docs/phases/`](docs/phases/).
 

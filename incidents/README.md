@@ -6,6 +6,8 @@ Incident-style write-ups of notable honeypot activity. All times UTC. IPs and UR
 |---|---|---|---|---|
 | [IR-2026-001](IR-2026-001-telnet-botnet-loader.md) | 2026-10-15 | Telnet IoT botnet loader campaign, 15-minute cadence (updated 10-16) | T1133, T1078.001, T1059.004, T1082, T1083, T1222.002, T1564.001 | Low / High |
 | [IR-2026-002](IR-2026-002-multi-protocol-dropper.md) | 2026-10-16 | Multi-protocol IoT dropper, payload server 185.93.89[.]72 (egress-blocked) | T1133, T1078.001, T1059.004, T1082, T1083, T1222.002, T1105, T1070.004 | Low / Critical |
+| [IR-2026-003](IR-2026-003-sensor-outage-memory-exhaustion.md) | 2026-10-28 | Sensor outage: host memory exhaustion (OOM), our own infrastructure | n/a (operational) | Medium |
+| [IR-2026-004](IR-2026-004-multi-arch-botnet-payloads.md) | 2026-10-28 | Multi-architecture IoT botnet payloads captured (`jkl*` kit, 29 files) | T1133, T1078.001, T1105, T1059.004, T1222.002, T1070.004 | Low / Critical |
 
 Working notes: [`notes/`](notes/)
 

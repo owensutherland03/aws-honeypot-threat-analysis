@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Summarize Cowrie JSON logs for threat analysis (Phase 5).
 
-Reads cowrie.json and its rotated copies (cowrie.json.YYYY-MM-DD), skips
-lines that aren't valid JSON, and prints an analyst-oriented summary.
+Streams cowrie.json and its rotated copies (cowrie.json.YYYY-MM-DD) in one
+pass, keeping only counters and small per-session summaries, so memory stays
+flat however large the logs get. (The first version loaded every event into a
+list and was OOM-killed on a 1 GB host after 12 days of data: see IR-2026-003.)
+Lines that aren't valid JSON are skipped and counted.
 
 Usage (on the honeypot):
     sudo python3 -I cowrie_report.py                      # summary
@@ -19,7 +22,7 @@ import glob
 import json
 import os
 import re
-from collections import Counter, defaultdict
+from collections import Counter
 
 ALWAYS_EXCLUDE = {"172.18.0.1"}  # Docker bridge = our own local tests
 
@@ -40,11 +43,13 @@ INDICATORS = {
     "history/log tampering": r"(history -c|unset HISTFILE|/var/log|rm -rf .*\.bash_history)",
     "router CLI escape (enable/system/shell)": r"^(enable|system|shell|sh|linuxshell)$|ping; sh",
 }
+INDICATOR_RX = {name: re.compile(p, re.IGNORECASE) for name, p in INDICATORS.items()}
 
 
-def load_events(logdir, exclude):
+def stream_events(logdir, exclude, stats):
+    """Yield events one at a time; count unparseable lines in stats['bad']."""
     files = sorted(glob.glob(os.path.join(logdir, "cowrie.json*")))
-    events, bad = [], 0
+    stats["files"] = len(files)
     for path in files:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:
@@ -54,13 +59,10 @@ def load_events(logdir, exclude):
                 try:
                     e = json.loads(line)
                 except json.JSONDecodeError:
-                    bad += 1
+                    stats["bad"] += 1
                     continue
-                if e.get("src_ip") in exclude:
-                    continue
-                events.append(e)
-    events.sort(key=lambda e: e.get("timestamp", ""))
-    return files, events, bad
+                if e.get("src_ip") not in exclude:
+                    yield e
 
 
 def table(title, counter, top, headers=("Value", "Count")):
@@ -76,74 +78,101 @@ def table(title, counter, top, headers=("Value", "Count")):
 
 
 def summary(events, top):
-    sessions = defaultdict(lambda: {"ip": None, "proto": None, "start": None, "end": None,
-                                    "cmds": [], "login": None, "downloads": 0, "client": None})
-    for e in events:
-        s = sessions[e.get("session")]
-        s["ip"] = s["ip"] or e.get("src_ip")
-        s["proto"] = s["proto"] or e.get("protocol")
-        s["start"] = s["start"] or e.get("timestamp")
-        s["end"] = e.get("timestamp")
-        ev = e.get("eventid", "")
-        if ev == "cowrie.command.input" and e.get("input"):
-            s["cmds"].append(e["input"])
-        elif ev == "cowrie.login.success":
-            s["login"] = f'{e.get("username")}/{e.get("password")}'
-        elif ev.startswith("cowrie.session.file_"):
-            s["downloads"] += 1
-        elif ev == "cowrie.client.version":
-            s["client"] = e.get("version")
+    ev_count, protocols, src_sessions = Counter(), Counter(), Counter()
+    creds, users, cmds, clients, hassh, downloads = Counter(), Counter(), Counter(), Counter(), Counter(), Counter()
+    download_ips = {}
+    indicator_sessions = {name: set() for name in INDICATORS}
+    indicator_ips = {name: set() for name in INDICATORS}
+    # Per session: [ip, proto, start, command_count, downloads, login, first_3_commands]
+    sessions = {}
+    ips = set()
+    first = last = None
 
-    ev_count = Counter(e.get("eventid") for e in events)
-    ips = {e.get("src_ip") for e in events if e.get("src_ip")}
+    for e in events:
+        ev = e.get("eventid", "")
+        ts = e.get("timestamp", "")
+        ip = e.get("src_ip")
+        if ts:
+            first = ts if first is None or ts < first else first
+            last = ts if last is None or ts > last else last
+        if ip:
+            ips.add(ip)
+        ev_count[ev] += 1
+        sid = e.get("session")
+        s = sessions.get(sid)
+        if s is None:
+            s = sessions[sid] = [ip, e.get("protocol"), ts, 0, 0, None, []]
+
+        if ev == "cowrie.session.connect":
+            protocols[e.get("protocol")] += 1
+            src_sessions[ip] += 1
+        elif ev.startswith("cowrie.login."):
+            creds[f'{e.get("username")} / {e.get("password")}'] += 1
+            users[e.get("username")] += 1
+            if ev == "cowrie.login.success":
+                s[5] = f'{e.get("username")}/{e.get("password")}'
+        elif ev == "cowrie.command.input" and e.get("input"):
+            cmd = e["input"]
+            cmds[cmd] += 1
+            s[3] += 1
+            if len(s[6]) < 3:
+                s[6].append(cmd[:60])
+            for name, rx in INDICATOR_RX.items():
+                if rx.search(cmd):
+                    indicator_sessions[name].add(sid)
+                    indicator_ips[name].add(ip)
+        elif ev.startswith("cowrie.session.file_"):
+            key = (e.get("url") or e.get("filename"), e.get("shasum"))
+            downloads[key] += 1
+            download_ips.setdefault(key, set()).add(ip)
+            s[4] += 1
+        elif ev == "cowrie.client.version":
+            clients[e.get("version")] += 1
+        elif ev == "cowrie.client.kex":
+            hassh[e.get("hassh")] += 1
+
+    if first is None:
+        raise SystemExit("No events found.")
     print("# Cowrie activity summary")
-    print(f"  Time span:      {events[0]['timestamp']}  ->  {events[-1]['timestamp']}")
-    print(f"  Events:         {len(events)}")
+    print(f"  Time span:      {first}  ->  {last}")
+    print(f"  Events:         {sum(ev_count.values())}")
     print(f"  Sessions:       {ev_count['cowrie.session.connect']}")
     print(f"  Unique IPs:     {len(ips)}")
     print(f"  Logins ok/fail: {ev_count['cowrie.login.success']} / {ev_count['cowrie.login.failed']}")
     print(f"  Commands:       {ev_count['cowrie.command.input']}")
-    print(f"  Downloads:      {ev_count['cowrie.session.file_download']}  Uploads: {ev_count['cowrie.session.file_upload']}")
-    print(f"  Sessions with commands: {sum(1 for s in sessions.values() if s['cmds'])}")
+    print(f"  Downloads:      {ev_count['cowrie.session.file_download']}  "
+          f"(failed: {ev_count['cowrie.session.file_download.failed']})  Uploads: {ev_count['cowrie.session.file_upload']}")
+    print(f"  Sessions with commands: {sum(1 for s in sessions.values() if s[3])}")
 
-    table("Sessions by protocol", Counter(e.get("protocol") for e in events if e.get("eventid") == "cowrie.session.connect"), top)
-    table("Top source IPs (sessions)", Counter(e.get("src_ip") for e in events if e.get("eventid") == "cowrie.session.connect"), top)
-    logins = [e for e in events if e.get("eventid", "").startswith("cowrie.login.")]
-    table("Top credential pairs", Counter(f'{e.get("username")} / {e.get("password")}' for e in logins), top)
-    table("Top usernames", Counter(e.get("username") for e in logins), top)
-    cmds = [e["input"] for e in events if e.get("eventid") == "cowrie.command.input" and e.get("input")]
-    table("Top commands", Counter(cmds), top + 15)
+    table("Sessions by protocol", protocols, top)
+    table("Top source IPs (sessions)", src_sessions, top)
+    table("Top credential pairs", creds, top)
+    table("Top usernames", users, top)
+    table("Top commands", cmds, top + 15)
 
     print("\n## Behaviour indicators in commands (sessions / IPs)")
-    for name, pattern in INDICATORS.items():
-        rx = re.compile(pattern, re.IGNORECASE)
-        hit = [s for s in sessions.values() if any(rx.search(c) for c in s["cmds"])]
-        if hit:
-            print(f"  {name:<52} {len(hit):>4} sessions  {len({s['ip'] for s in hit}):>4} IPs")
+    for name in INDICATORS:
+        if indicator_sessions[name]:
+            print(f"  {name:<52} {len(indicator_sessions[name]):>6} sessions  {len(indicator_ips[name]):>5} IPs")
 
-    dl = [e for e in events if e.get("eventid", "").startswith("cowrie.session.file_")]
     print("\n## Downloads / uploads (URL or filename -> SHA-256)")
-    if not dl:
+    if not downloads:
         print("  (none)")
-    seen = Counter((e.get("url") or e.get("filename"), e.get("shasum")) for e in dl)
-    for (src, sha), n in seen.most_common(top):
-        ips_for = {e.get("src_ip") for e in dl if (e.get("url") or e.get("filename")) == src and e.get("shasum") == sha}
-        print(f"  {n:>3}x  {len(ips_for)} IP(s)  {src}\n        sha256={sha}")
+    for (src, sha), n in downloads.most_common(top):
+        print(f"  {n:>4}x  {len(download_ips[(src, sha)])} IP(s)  {src}\n        sha256={sha}")
 
-    table("SSH client versions", Counter(e.get("version") for e in events if e.get("eventid") == "cowrie.client.version"), top)
-    table("HASSH fingerprints", Counter(e.get("hassh") for e in events if e.get("eventid") == "cowrie.client.kex"), top)
+    table("SSH client versions", clients, top)
+    table("HASSH fingerprints", hassh, top)
 
     print("\n## Most active sessions (by command count)")
-    ranked = sorted(((sid, s) for sid, s in sessions.items() if s["cmds"]),
-                    key=lambda kv: len(kv[1]["cmds"]), reverse=True)
-    for sid, s in ranked[:top]:
-        first = " | ".join(c[:60] for c in s["cmds"][:3])
-        print(f"  {sid}  {s['ip'] or '?':<15} {s['proto'] or '?':<6} {(s['start'] or '')[:19]}  "
-              f"cmds={len(s['cmds']):<3} dl={s['downloads']} login={s['login']}\n        {first}")
+    ranked = sorted(((sid, s) for sid, s in sessions.items() if s[3]), key=lambda kv: kv[1][3], reverse=True)
+    for sid, (ip, proto, start, n, dl, login, firsts) in ranked[:top]:
+        print(f"  {sid}  {ip or '?':<15} {proto or '?':<6} {(start or '')[:19]}  "
+              f"cmds={n:<4} dl={dl} login={login}\n        {' | '.join(firsts)}")
 
 
 def timeline(events, key, value):
-    rows = [e for e in events if e.get(key) == value]
+    rows = sorted((e for e in events if e.get(key) == value), key=lambda e: e.get("timestamp", ""))
     if not rows:
         print(f"No events with {key}={value}")
         return
@@ -154,9 +183,7 @@ def timeline(events, key, value):
         if ev in skip:
             continue
         detail = (e.get("input") or e.get("url") or e.get("message") or "").replace("\n", "\\n")
-        extra = ""
-        if e.get("shasum"):
-            extra = f"  sha256={e['shasum']}"
+        extra = f"  sha256={e['shasum']}" if e.get("shasum") else ""
         print(f"  {e.get('timestamp', '')[:23]}  {e.get('session', ''):<12}  {ev:<32} {detail[:140]}{extra}")
 
 
@@ -169,16 +196,19 @@ def main():
     ap.add_argument("--ip")
     a = ap.parse_args()
     exclude = ALWAYS_EXCLUDE | {x.strip() for x in a.exclude.split(",") if x.strip()}
-    files, events, bad = load_events(a.logdir, exclude)
-    if not events:
-        raise SystemExit(f"No events found in {a.logdir}")
-    if a.session:
-        timeline(events, "session", a.session)
-    elif a.ip:
-        timeline(events, "src_ip", a.ip)
-    else:
-        print(f"(files: {len(files)}, unparseable lines skipped: {bad}, excluded IPs: {', '.join(sorted(exclude))})\n")
-        summary(events, a.top)
+    stats = {"bad": 0, "files": 0}
+    events = stream_events(a.logdir, exclude, stats)
+    try:
+        if a.session:
+            timeline(events, "session", a.session)
+        elif a.ip:
+            timeline(events, "src_ip", a.ip)
+        else:
+            summary(events, a.top)
+            print(f"\n(files: {stats['files']}, unparseable lines skipped: {stats['bad']}, "
+                  f"excluded IPs: {', '.join(sorted(exclude))})")
+    except BrokenPipeError:  # output piped into `head`
+        pass
 
 
 if __name__ == "__main__":

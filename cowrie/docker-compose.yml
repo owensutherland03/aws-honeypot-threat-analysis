@@ -41,7 +41,10 @@ services:
       - ALL                    # no Linux capabilities at all
     security_opt:
       - no-new-privileges:true # no setuid escalation inside the container
-    mem_limit: 512m
+    # Must be well below what the HOST can spare, so the container (not the host)
+    # is OOM-killed and restarted. 512m on a 1 GB t4g.micro exhausted the host
+    # after ~10 days (IR-2026-003).
+    mem_limit: 300m
     pids_limit: 256
     logging:
       driver: json-file
